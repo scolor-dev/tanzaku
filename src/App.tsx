@@ -3,6 +3,7 @@ import {
   Check,
   Copy,
   Cpu,
+  Download,
   Loader2,
   MoonStar,
   RefreshCw,
@@ -134,6 +135,10 @@ type WishAnalysis = {
   angle: string;
 };
 
+type ShareNavigator = Navigator & {
+  canShare?: (data: ShareData) => boolean;
+};
+
 const sampleWishes = [
   "今年中に副業で月10万円稼ぎたい",
   "英語を話せるようになりたい",
@@ -169,6 +174,186 @@ function clearResultUrl() {
   url.searchParams.delete(SHARE_WISH_PARAM);
   url.searchParams.delete(SHARE_REPLY_PARAM);
   window.history.replaceState({}, "", url.toString());
+}
+
+function wrapCanvasText(
+  context: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+) {
+  const lines: string[] = [];
+  let line = "";
+
+  for (const char of text) {
+    const nextLine = line + char;
+
+    if (line && context.measureText(nextLine).width > maxWidth) {
+      lines.push(line);
+      line = char;
+      continue;
+    }
+
+    line = nextLine;
+  }
+
+  if (line) {
+    lines.push(line);
+  }
+
+  return lines;
+}
+
+function drawRoundedRect(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+) {
+  context.beginPath();
+  context.moveTo(x + radius, y);
+  context.arcTo(x + width, y, x + width, y + height, radius);
+  context.arcTo(x + width, y + height, x, y + height, radius);
+  context.arcTo(x, y + height, x, y, radius);
+  context.arcTo(x, y, x + width, y, radius);
+  context.closePath();
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error("画像の生成に失敗しました。"));
+        return;
+      }
+
+      resolve(blob);
+    }, "image/png");
+  });
+}
+
+async function createResultImageBlob(wish: string, reply: string) {
+  const canvas = document.createElement("canvas");
+  const scale = 2;
+  const width = 1200;
+  const height = 630;
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("Canvasを利用できません。");
+  }
+
+  canvas.width = width * scale;
+  canvas.height = height * scale;
+  context.scale(scale, scale);
+
+  const nightGradient = context.createLinearGradient(0, 0, width, height);
+  nightGradient.addColorStop(0, "#06101f");
+  nightGradient.addColorStop(0.52, "#0b1a35");
+  nightGradient.addColorStop(1, "#152742");
+  context.fillStyle = nightGradient;
+  context.fillRect(0, 0, width, height);
+
+  context.fillStyle = "rgba(255, 246, 191, 0.92)";
+  context.beginPath();
+  context.arc(1018, 118, 62, 0, Math.PI * 2);
+  context.fill();
+
+  context.fillStyle = "rgba(255,255,255,0.88)";
+  for (let index = 0; index < 72; index += 1) {
+    const x = (index * 137) % width;
+    const y = (index * 79) % height;
+    const size = index % 9 === 0 ? 2.2 : 1.1;
+    context.beginPath();
+    context.arc(x, y, size, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  context.strokeStyle = "rgba(126, 211, 146, 0.7)";
+  context.lineWidth = 5;
+  for (let index = 0; index < 5; index += 1) {
+    const x = 68 + index * 24;
+    context.beginPath();
+    context.moveTo(x, 640);
+    context.lineTo(x + 88, -20);
+    context.stroke();
+  }
+  context.fillStyle = "rgba(150, 220, 152, 0.62)";
+  for (let index = 0; index < 15; index += 1) {
+    const x = 78 + (index % 5) * 25;
+    const y = 120 + Math.floor(index / 5) * 145;
+    context.beginPath();
+    context.ellipse(x + 60, y, 58, 13, -0.45, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  context.save();
+  context.translate(600, 338);
+  context.rotate(-0.025);
+  context.shadowColor = "rgba(0, 0, 0, 0.34)";
+  context.shadowBlur = 30;
+  context.shadowOffsetY = 18;
+  const paperGradient = context.createLinearGradient(-340, -230, 340, 230);
+  paperGradient.addColorStop(0, "#fff3e2");
+  paperGradient.addColorStop(0.48, "#ffe8d6");
+  paperGradient.addColorStop(1, "#ffd7dd");
+  context.fillStyle = paperGradient;
+  drawRoundedRect(context, -382, -244, 764, 488, 18);
+  context.fill();
+  context.shadowColor = "transparent";
+
+  context.strokeStyle = "rgba(156, 70, 91, 0.18)";
+  context.lineWidth = 2;
+  for (let x = -330; x <= 330; x += 40) {
+    context.beginPath();
+    context.moveTo(x, -190);
+    context.lineTo(x, 200);
+    context.stroke();
+  }
+
+  context.fillStyle = "#7f1d1d";
+  context.beginPath();
+  context.arc(0, -205, 13, 0, Math.PI * 2);
+  context.fill();
+  context.strokeStyle = "#be123c";
+  context.lineWidth = 8;
+  context.beginPath();
+  context.moveTo(0, -218);
+  context.lineTo(0, -288);
+  context.stroke();
+
+  context.textAlign = "center";
+  context.fillStyle = "#881337";
+  context.font =
+    '700 34px "Hiragino Sans", "Yu Gothic", "Noto Sans JP", sans-serif';
+  context.fillText("マジレス短冊AI", 0, -138);
+
+  context.fillStyle = "#3f1b22";
+  context.font =
+    '900 48px "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif';
+  const replyLines = wrapCanvasText(context, reply, 590).slice(0, 4);
+  const replyLineHeight = 64;
+  const replyStartY = -34 - ((replyLines.length - 1) * replyLineHeight) / 2;
+  replyLines.forEach((line, index) => {
+    context.fillText(line, 0, replyStartY + index * replyLineHeight);
+  });
+
+  context.fillStyle = "#9f1239";
+  context.font =
+    '600 24px "Hiragino Sans", "Yu Gothic", "Noto Sans JP", sans-serif';
+  const wishLines = wrapCanvasText(context, `願い事: ${wish}`, 620).slice(0, 2);
+  wishLines.forEach((line, index) => {
+    context.fillText(line, 0, 160 + index * 34);
+  });
+  context.restore();
+
+  context.fillStyle = "rgba(255, 255, 255, 0.78)";
+  context.font = '600 24px "Hiragino Sans", "Yu Gothic", sans-serif';
+  context.textAlign = "right";
+  context.fillText("scolor-dev.github.io/tanzaku", 1132, 584);
+
+  return canvasToBlob(canvas);
 }
 
 function buildAnalysisPrompt(wishText: string) {
@@ -766,11 +951,48 @@ export default function App() {
     }
   }
 
+  async function downloadResultImage() {
+    try {
+      const blob = await createResultImageBlob(wishText, majiResReplies[0] ?? "");
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+
+      anchor.href = url;
+      anchor.download = "majires-tanzaku.png";
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      setShareStatus("画像を保存しました");
+    } catch (error) {
+      console.error(error);
+      setShareStatus("画像の生成に失敗しました");
+    }
+  }
+
   async function shareResult() {
     const text = buildShareText(false);
 
     try {
       if ("share" in navigator) {
+        const imageBlob = await createResultImageBlob(wishText, majiResReplies[0] ?? "");
+        const imageFile = new File([imageBlob], "majires-tanzaku.png", {
+          type: "image/png",
+        });
+        const shareNavigator = navigator as ShareNavigator;
+        const shareData = {
+          title: "マジレス短冊AI",
+          text,
+          url: getShareUrl(),
+          files: [imageFile],
+        };
+
+        if (shareNavigator.canShare?.(shareData)) {
+          await navigator.share(shareData);
+          setShareStatus("画像つきで共有しました");
+          return;
+        }
+
         await navigator.share({
           title: "マジレス短冊AI",
           text,
@@ -954,6 +1176,14 @@ export default function App() {
                   >
                     <Share2 className="h-4 w-4" />
                     共有
+                  </button>
+                  <button
+                    type="button"
+                    onClick={downloadResultImage}
+                    className="inline-flex items-center justify-center gap-2 rounded border border-white/15 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15"
+                  >
+                    <Download className="h-4 w-4" />
+                    画像保存
                   </button>
                   <button
                     type="button"
