@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   Copy,
@@ -84,6 +84,8 @@ declare global {
 }
 
 const RESPONSE_COUNT = 1;
+const SHARE_WISH_PARAM = "wish";
+const SHARE_REPLY_PARAM = "res";
 
 const MAJI_RES_SCHEMA = JSON.stringify({
   type: "array",
@@ -137,6 +139,37 @@ const sampleWishes = [
   "英語を話せるようになりたい",
   "健康的に5kg痩せたい",
 ];
+
+function readSharedResult() {
+  const params = new URLSearchParams(window.location.search);
+  const sharedWish = params.get(SHARE_WISH_PARAM)?.trim() ?? "";
+  const sharedReply = params.get(SHARE_REPLY_PARAM)?.trim() ?? "";
+
+  if (!sharedWish || !sharedReply) {
+    return null;
+  }
+
+  return {
+    wish: sharedWish.slice(0, 120),
+    reply: sharedReply.slice(0, 80),
+  };
+}
+
+function buildResultUrl(wish: string, reply: string) {
+  const url = new URL(window.location.href);
+
+  url.searchParams.set(SHARE_WISH_PARAM, wish);
+  url.searchParams.set(SHARE_REPLY_PARAM, reply);
+  return url.toString();
+}
+
+function clearResultUrl() {
+  const url = new URL(window.location.href);
+
+  url.searchParams.delete(SHARE_WISH_PARAM);
+  url.searchParams.delete(SHARE_REPLY_PARAM);
+  window.history.replaceState({}, "", url.toString());
+}
 
 function buildAnalysisPrompt(wishText: string) {
   return `願い事を分析してください。まだマジレス本文は作らないでください。
@@ -484,6 +517,18 @@ export default function App() {
   const progressPercent = useMemo(() => Math.round(progress * 100), [progress]);
   const selectedModel = MODEL_OPTIONS.find((model) => model.id === selectedModelId) ?? MODEL_OPTIONS[0];
 
+  useEffect(() => {
+    const sharedResult = readSharedResult();
+
+    if (!sharedResult) {
+      return;
+    }
+
+    setWishText(sharedResult.wish);
+    setMajiResReplies([sharedResult.reply]);
+    setMode("result");
+  }, []);
+
   async function getEngine(modelId: string) {
     if (engineSlotRef.current?.modelId === modelId) {
       return engineSlotRef.current.promise;
@@ -681,6 +726,7 @@ export default function App() {
           : await generateWithWebLlm(cleanWish, selectedModel);
 
       setMajiResReplies(replies);
+      window.history.replaceState({}, "", buildResultUrl(cleanWish, replies[0] ?? ""));
       setMode("result");
     } catch (error) {
       console.error(error);
@@ -689,16 +735,25 @@ export default function App() {
     }
   }
 
-  function buildShareText() {
+  function buildShareText(includeUrl = true) {
     const reply = majiResReplies[0] ?? "";
+    const shareUrl = buildResultUrl(wishText, reply);
 
-    return [
+    const lines = [
       "【マジレス短冊AI】",
       `願い事: ${wishText}`,
       `マジレス: ${reply}`,
-      "",
-      window.location.href,
-    ].join("\n");
+    ];
+
+    if (includeUrl) {
+      lines.push("", shareUrl);
+    }
+
+    return lines.join("\n");
+  }
+
+  function getShareUrl() {
+    return buildResultUrl(wishText, majiResReplies[0] ?? "");
   }
 
   async function copyResult() {
@@ -712,14 +767,14 @@ export default function App() {
   }
 
   async function shareResult() {
-    const text = buildShareText();
+    const text = buildShareText(false);
 
     try {
       if ("share" in navigator) {
         await navigator.share({
           title: "マジレス短冊AI",
           text,
-          url: window.location.href,
+          url: getShareUrl(),
         });
         setShareStatus("共有しました");
         return;
@@ -741,6 +796,7 @@ export default function App() {
     setErrorMessage("");
     setMajiResReplies([]);
     setShareStatus("");
+    clearResultUrl();
   }
 
   return (
