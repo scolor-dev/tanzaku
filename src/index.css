@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  background: #07111f;
+}
+
+button,
+textarea,
+input {
+  font: inherit;
+}
+
+.star-field {
+  background-image:
+    radial-gradient(circle at 12% 20%, rgba(255, 255, 255, 0.9) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 78% 16%, rgba(255, 255, 255, 0.75) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 68% 72%, rgba(255, 255, 255, 0.7) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 28% 68%, rgba(255, 255, 255, 0.65) 0 1px, transparent 1.5px);
+  background-size: 220px 220px, 260px 260px, 310px 310px, 180px 180px;
+}
+
+.bamboo-stalk {
+  background:
+    linear-gradient(90deg, transparent 0 48%, rgba(119, 197, 120, 0.62) 49% 53%, transparent 54%),
+    repeating-linear-gradient(
+      180deg,
+      transparent 0 54px,
+      rgba(170, 220, 153, 0.36) 55px 57px,
+      transparent 58px 110px
+    );
+}
+
+.tanzaku-paper {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(250, 244, 230, 0.95)),
+    repeating-linear-gradient(90deg, rgba(184, 126, 71, 0.05) 0 1px, transparent 1px 18px);
+}
