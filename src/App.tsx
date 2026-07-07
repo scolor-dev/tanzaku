@@ -16,11 +16,20 @@ import {
 
 const MODEL_OPTIONS = [
   {
+    id: "gemini-nano",
+    name: "Gemini Nano",
+    badge: "Chrome",
+    note: "Chrome組み込みAI。対応ChromeならモデルDL後にブラウザ内で動作",
+    vram: "内蔵",
+    backend: "gemini-nano",
+  },
+  {
     id: "Qwen3-1.7B-q4f16_1-MLC",
     name: "Qwen3 1.7B",
     badge: "推奨",
     note: "動作確認済み。速度と安定性の本命",
     vram: "約2.1GB",
+    backend: "web-llm",
   },
   {
     id: "Llama-3.2-1B-Instruct-q4f16_1-MLC",
@@ -28,6 +37,7 @@ const MODEL_OPTIONS = [
     badge: "軽量",
     note: "0.8Bが不安定な時の1.7B未満候補",
     vram: "約0.9GB",
+    backend: "web-llm",
   },
   {
     id: "Qwen3.5-2B-q4f16_1-MLC",
@@ -35,8 +45,41 @@ const MODEL_OPTIONS = [
     badge: "品質",
     note: "少し重いが文章品質を上げたい時に",
     vram: "約2.3GB",
+    backend: "web-llm",
   },
 ] as const;
+
+type ModelOption = (typeof MODEL_OPTIONS)[number];
+type ModelBackend = ModelOption["backend"];
+
+type BuiltInLanguageModelAvailability = "available" | "downloadable" | "downloading" | "unavailable";
+
+type BuiltInLanguageModelSession = {
+  prompt(input: string): Promise<string>;
+  destroy?(): void;
+};
+
+type BuiltInLanguageModelMonitor = {
+  addEventListener(
+    type: "downloadprogress",
+    listener: (event: { loaded: number }) => void,
+  ): void;
+};
+
+type BuiltInLanguageModelFactory = {
+  availability(options?: unknown): Promise<BuiltInLanguageModelAvailability>;
+  create(options?: {
+    monitor?: (monitor: BuiltInLanguageModelMonitor) => void;
+    expectedInputs?: Array<{ type: "text"; languages: string[] }>;
+    expectedOutputs?: Array<{ type: "text"; languages: string[] }>;
+  }): Promise<BuiltInLanguageModelSession>;
+};
+
+declare global {
+  interface Window {
+    LanguageModel?: BuiltInLanguageModelFactory;
+  }
+}
 
 const RESPONSE_COUNT = 1;
 
@@ -427,7 +470,7 @@ function createFallbackMajiRes(wishText: string, analysis = createLocalAnalysis(
 
 export default function App() {
   const [wishText, setWishText] = useState("");
-  const [selectedModelId, setSelectedModelId] = useState<string>(MODEL_OPTIONS[0].id);
+  const [selectedModelId, setSelectedModelId] = useState<string>("Qwen3-1.7B-q4f16_1-MLC");
   const [mode, setMode] = useState<AppMode>("input");
   const [progress, setProgress] = useState(0);
   const [progressText, setProgressText] = useState("待機中");
@@ -460,6 +503,153 @@ export default function App() {
     return promise;
   }
 
+  async function promptGeminiNano(prompt: string) {
+    const languageModel = window.LanguageModel;
+
+    if (!languageModel) {
+      throw new Error("Gemini Nanoを使うChrome Prompt APIが見つかりません。");
+    }
+
+    const languageOptions = {
+      expectedInputs: [{ type: "text" as const, languages: ["ja"] }],
+      expectedOutputs: [{ type: "text" as const, languages: ["ja"] }],
+    };
+    const availability = await languageModel.availability(languageOptions);
+
+    if (availability === "unavailable") {
+      throw new Error("この環境ではGemini Nanoを利用できません。Chromeの対応版で試してください。");
+    }
+
+    const session = await languageModel.create({
+      ...languageOptions,
+      monitor(monitor) {
+        monitor.addEventListener("downloadprogress", (event) => {
+          setProgress(Math.max(0, Math.min(1, event.loaded ?? 0)));
+          setProgressText("Gemini Nanoをダウンロード中");
+        });
+      },
+    });
+
+    try {
+      return await session.prompt(prompt);
+    } finally {
+      session.destroy?.();
+    }
+  }
+
+  async function generateWithGeminiNano(cleanWish: string) {
+    let analysis = createLocalAnalysis(cleanWish);
+    let lastReply = "";
+
+    setProgressText("Gemini Nanoで願い事を分解中");
+
+    try {
+      const analysisReply = await promptGeminiNano(
+        `${buildAnalysisPrompt(cleanWish)}\n\nJSONオブジェクトのみを出力してください。`,
+      );
+      analysis = parseAnalysis(analysisReply);
+    } catch (error) {
+      console.warn("Using local wish analysis after invalid Gemini Nano output:", error);
+    }
+
+    setProgressText("Gemini Nanoで辛口の一撃を生成中");
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      lastReply = await promptGeminiNano(
+        `${buildMajiResPrompt(cleanWish, analysis)}\n\n${
+          attempt === 0
+            ? "分析結果を使って、最高の辛口マジレスを1つだけ作ってください。"
+            : "前回は形式崩れか品質不足でした。新しい1要素の文字列JSON配列だけを出力してください。"
+        }`,
+      );
+
+      try {
+        return parseMajiRes(lastReply, cleanWish);
+      } catch {
+        continue;
+      }
+    }
+
+    console.warn("Using fallback maji-res after invalid Gemini Nano output:", lastReply);
+    return [createFallbackMajiRes(cleanWish, analysis)];
+  }
+
+  async function generateWithWebLlm(cleanWish: string, selectedModel: ModelOption) {
+    const engine = await getEngine(selectedModel.id);
+    let analysis = createLocalAnalysis(cleanWish);
+    let lastReply = "";
+
+    setProgressText("願い事を分解中");
+
+    try {
+      const analysisCompletion = await engine.chat.completions.create({
+        messages: [
+          {
+            role: "system",
+            content: buildAnalysisPrompt(cleanWish),
+          },
+          {
+            role: "user",
+            content: "願い事を分析し、JSONオブジェクトのみを出力してください。",
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: 220,
+        response_format: {
+          type: "json_object",
+          schema: ANALYSIS_SCHEMA,
+        },
+        extra_body: selectedModel.id.startsWith("Qwen3")
+          ? { enable_thinking: false }
+          : undefined,
+      });
+
+      analysis = parseAnalysis(analysisCompletion.choices[0]?.message?.content ?? "");
+    } catch (error) {
+      console.warn("Using local wish analysis after invalid model output:", error);
+    }
+
+    setProgressText("辛口の一撃を生成中");
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const completion = await engine.chat.completions.create({
+        messages: [
+          {
+            role: "system",
+            content: buildMajiResPrompt(cleanWish, analysis),
+          },
+          {
+            role: "user",
+            content:
+              attempt === 0
+                ? "分析結果を使って、最高の辛口マジレスを1つだけ作ってください。"
+                : "前回は形式崩れか品質不足でした。分析結果に沿う新しい1要素の文字列JSON配列だけを出力してください。",
+          },
+        ],
+        temperature: attempt === 0 ? 0.35 : 0.15,
+        max_tokens: 120,
+        response_format: {
+          type: "json_object",
+          schema: MAJI_RES_SCHEMA,
+        },
+        extra_body: selectedModel.id.startsWith("Qwen3")
+          ? { enable_thinking: false }
+          : undefined,
+      });
+
+      lastReply = completion.choices[0]?.message?.content ?? "";
+
+      try {
+        return parseMajiRes(lastReply, cleanWish);
+      } catch {
+        continue;
+      }
+    }
+
+    console.warn("Using fallback maji-res after invalid model output:", lastReply);
+    return [createFallbackMajiRes(cleanWish, analysis)];
+  }
+
   async function generateMajiRes() {
     const cleanWish = wishText.trim();
 
@@ -469,7 +659,7 @@ export default function App() {
       return;
     }
 
-    if (!("gpu" in navigator)) {
+    if (selectedModel.backend === "web-llm" && !("gpu" in navigator)) {
       setErrorMessage("このブラウザはWebGPUに未対応です。ChromeやEdgeの最新版で試してください。");
       setMode("error");
       return;
@@ -482,87 +672,16 @@ export default function App() {
     setMajiResReplies([]);
 
     try {
-      const engine = await getEngine(selectedModel.id);
-      let analysis = createLocalAnalysis(cleanWish);
-      let lastReply = "";
+      const replies =
+        selectedModel.backend === "gemini-nano"
+          ? await generateWithGeminiNano(cleanWish)
+          : await generateWithWebLlm(cleanWish, selectedModel);
 
-      setProgressText("願い事を分解中");
-
-      try {
-        const analysisCompletion = await engine.chat.completions.create({
-          messages: [
-            {
-              role: "system",
-              content: buildAnalysisPrompt(cleanWish),
-            },
-            {
-              role: "user",
-              content: "願い事を分析し、JSONオブジェクトのみを出力してください。",
-            },
-          ],
-          temperature: 0.1,
-          max_tokens: 220,
-          response_format: {
-            type: "json_object",
-            schema: ANALYSIS_SCHEMA,
-          },
-          extra_body: selectedModel.id.startsWith("Qwen3")
-            ? { enable_thinking: false }
-            : undefined,
-        });
-
-        analysis = parseAnalysis(analysisCompletion.choices[0]?.message?.content ?? "");
-      } catch (error) {
-        console.warn("Using local wish analysis after invalid model output:", error);
-      }
-
-      setProgressText("辛口の一撃を生成中");
-
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        const completion = await engine.chat.completions.create({
-          messages: [
-            {
-              role: "system",
-              content: buildMajiResPrompt(cleanWish, analysis),
-            },
-            {
-              role: "user",
-              content:
-                attempt === 0
-                  ? "分析結果を使って、最高の辛口マジレスを1つだけ作ってください。"
-                  : "前回は形式崩れか品質不足でした。分析結果に沿う新しい1要素の文字列JSON配列だけを出力してください。",
-            },
-          ],
-          temperature: attempt === 0 ? 0.35 : 0.15,
-          max_tokens: 120,
-          response_format: {
-            type: "json_object",
-            schema: MAJI_RES_SCHEMA,
-          },
-          extra_body: selectedModel.id.startsWith("Qwen3")
-            ? { enable_thinking: false }
-            : undefined,
-        });
-
-        lastReply = completion.choices[0]?.message?.content ?? "";
-
-        try {
-          setMajiResReplies(parseMajiRes(lastReply, cleanWish));
-          setMode("result");
-          return;
-        } catch {
-          continue;
-        }
-      }
-
-      console.warn("Using fallback maji-res after invalid model output:", lastReply);
-      setMajiResReplies([createFallbackMajiRes(cleanWish, analysis)]);
+      setMajiResReplies(replies);
       setMode("result");
     } catch (error) {
       console.error(error);
-      setErrorMessage(
-        "短冊AIの返事が少し乱れました。願い事を短めにして、もう一度だけ現実を浴びせてください。",
-      );
+      setErrorMessage(error instanceof Error ? error.message : "短冊AIの返事が少し乱れました。");
       setMode("error");
     }
   }
