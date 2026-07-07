@@ -1,11 +1,13 @@
 import { useMemo, useRef, useState } from "react";
 import {
   Check,
+  Copy,
   Cpu,
   Loader2,
   MoonStar,
   RefreshCw,
   Send,
+  Share2,
   Sparkles,
   Wand2,
 } from "lucide-react";
@@ -476,6 +478,7 @@ export default function App() {
   const [progressText, setProgressText] = useState("待機中");
   const [majiResReplies, setMajiResReplies] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState("");
+  const [shareStatus, setShareStatus] = useState("");
   const engineSlotRef = useRef<EngineSlot | null>(null);
 
   const progressPercent = useMemo(() => Math.round(progress * 100), [progress]);
@@ -686,10 +689,58 @@ export default function App() {
     }
   }
 
+  function buildShareText() {
+    const reply = majiResReplies[0] ?? "";
+
+    return [
+      "【マジレス短冊AI】",
+      `願い事: ${wishText}`,
+      `マジレス: ${reply}`,
+      "",
+      window.location.href,
+    ].join("\n");
+  }
+
+  async function copyResult() {
+    try {
+      await navigator.clipboard.writeText(buildShareText());
+      setShareStatus("コピーしました");
+    } catch (error) {
+      console.error(error);
+      setShareStatus("コピーに失敗しました");
+    }
+  }
+
+  async function shareResult() {
+    const text = buildShareText();
+
+    try {
+      if ("share" in navigator) {
+        await navigator.share({
+          title: "マジレス短冊AI",
+          text,
+          url: window.location.href,
+        });
+        setShareStatus("共有しました");
+        return;
+      }
+
+      await copyResult();
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+
+      console.error(error);
+      await copyResult();
+    }
+  }
+
   function resetForm() {
     setMode("input");
     setErrorMessage("");
     setMajiResReplies([]);
+    setShareStatus("");
   }
 
   return (
@@ -839,14 +890,32 @@ export default function App() {
                     マジレス短冊
                   </h2>
                 </div>
-                <button
-                  type="button"
-                  onClick={resetForm}
-                  className="inline-flex items-center justify-center gap-2 rounded border border-white/15 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                  別の願いを書く
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={shareResult}
+                    className="inline-flex items-center justify-center gap-2 rounded bg-rose-700 px-4 py-3 text-sm font-semibold text-white transition hover:bg-rose-600"
+                  >
+                    <Share2 className="h-4 w-4" />
+                    共有
+                  </button>
+                  <button
+                    type="button"
+                    onClick={copyResult}
+                    className="inline-flex items-center justify-center gap-2 rounded border border-white/15 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15"
+                  >
+                    <Copy className="h-4 w-4" />
+                    コピー
+                  </button>
+                  <button
+                    type="button"
+                    onClick={resetForm}
+                    className="inline-flex items-center justify-center gap-2 rounded border border-white/15 bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/15"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    別の願いを書く
+                  </button>
+                </div>
               </div>
 
               <div className="mx-auto grid max-w-xl gap-4">
@@ -861,6 +930,11 @@ export default function App() {
                     </p>
                   </article>
                 ))}
+                {shareStatus && (
+                  <p className="text-center text-sm font-semibold text-emerald-100">
+                    {shareStatus}
+                  </p>
+                )}
               </div>
             </section>
           )}
